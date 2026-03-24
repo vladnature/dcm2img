@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DICOM Viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dicom-parser/1.8.21/dicomParser.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #080c10;
+    --surface:   #0d1117;
+    --panel:     #111820;
+    --border:    #1e2d3d;
+    --accent:    #00d4ff;
+    --accent2:   #00ff9d;
+    --warn:      #ff6b35;
+    --text:      #c9d8e8;
+    --muted:     #4a6278;
+    --font-ui:   'Syne', sans-serif;
+    --font-mono: 'Space Mono', monospace;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,212,255,0.012) 2px, rgba(0,212,255,0.012) 4px);
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  .app { display: flex; flex-direction: column; min-height: 100vh; }
+
+  /* HEADER */
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 2rem; height: 56px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo {
+    font-family: var(--font-mono); font-size: 1.1rem; font-weight: 700;
+    color: var(--accent); letter-spacing: 0.08em;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .logo-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent2);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity:1; transform:scale(1); }
+    50%      { opacity:0.4; transform:scale(0.7); }
+  }
+  .badge {
+    font-family: var(--font-mono); font-size: 0.65rem;
+    padding: 2px 8px; border: 1px solid var(--border);
+    border-radius: 2px; color: var(--muted); letter-spacing: 0.1em;
+  }
+
+  /* LAYOUT */
+  .workspace {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    flex: 1; min-height: 0;
+  }
+
+  /* SIDEBAR */
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow-y: auto; height: calc(100vh - 56px - 41px);
+    position: sticky; top: 56px;
+  }
+  .sidebar-section {
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-label {
+    font-family: var(--font-mono); font-size: 0.6rem;
+    letter-spacing: 0.18em; color: var(--muted);
+    text-transform: uppercase; margin-bottom: 1rem;
+  }
+
+  /* DROPZONE */
+  .dropzone {
+    border: 1.5px dashed var(--border); border-radius: 6px;
+    padding: 2rem 1.5rem; text-align: center; cursor: pointer;
+    transition: all 0.2s; background: var(--panel);
+  }
+  .dropzone:hover, .dropzone.drag-over {
+    border-color: var(--accent);
+    background: rgba(0,212,255,0.04);
+  }
+  .dropzone-icon { font-size: 2rem; margin-bottom: 0.75rem; display: block; }
+  .dropzone-title { font-size: 0.85rem; font-weight: 600; color: var(--text); margin-bottom: 0.3rem; }
+  .dropzone-sub { font-family: var(--font-mono); font-size: 0.65rem; color: var(--muted); }
+
+  /* CONTROLS */
+  .control-row { display: flex; flex-direction: column; gap: 0.75rem; }
+  .control-group { display: flex; flex-direction: column; gap: 0.3rem; }
+  .control-label {
+    display: flex; justify-content: space-between;
+    font-family: var(--font-mono); font-size: 0.65rem; color: var(--muted);
+  }
+  .control-value { color: var(--accent); }
+  .slider {
+    -webkit-appearance: none; width: 100%; height: 3px;
+    background: var(--border); border-radius: 2px; outline: none; cursor: pointer;
+  }
+  .slider::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px;
+    border-radius: 50%; background: var(--accent); cursor: pointer;
+    box-shadow: 0 0 8px rgba(0,212,255,0.5);
+  }
+  .apply-btn {
+    margin-top: 0.5rem; width: 100%; padding: 0.5rem;
+    background: transparent; border: 1px solid var(--accent);
+    color: var(--accent); font-family: var(--font-mono);
+    font-size: 0.7rem; letter-spacing: 0.1em;
+    cursor: pointer; border-radius: 3px; transition: all 0.2s;
+  }
+  .apply-btn:hover { background: rgba(0,212,255,0.1); }
+  .apply-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  /* METADATA */
+  .meta-table { width: 100%; border-collapse: collapse; }
+  .meta-table tr { border-bottom: 1px solid rgba(30,45,61,0.5); }
+  .meta-table tr:last-child { border-bottom: none; }
+  .meta-table td { padding: 0.4rem 0; font-size: 0.75rem; vertical-align: top; }
+  .meta-key { color: var(--muted); font-family: var(--font-mono); font-size: 0.65rem; width: 45%; padding-right: 0.5rem; }
+  .meta-val { color: var(--text); word-break: break-all; }
+  .meta-empty { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); }
+
+  /* VIEWER */
+  .viewer {
+    background: #020408;
+    display: flex; align-items: center; justify-content: center;
+    position: relative; overflow: hidden; min-height: 600px;
+  }
+  .viewer-empty { text-align: center; color: var(--muted); }
+  .viewer-empty-icon { font-size: 4rem; margin-bottom: 1rem; opacity: 0.3; display: block; }
+  .viewer-empty-text { font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.1em; }
+
+  canvas {
+    max-width: 100%; max-height: 100%;
+    object-fit: contain; image-rendering: pixelated;
+    animation: fadeIn 0.4s ease;
+  }
+  @keyframes fadeIn {
+    from { opacity:0; transform: scale(0.98); }
+    to   { opacity:1; transform: scale(1); }
+  }
+
+  /* HUD */
+  .hud {
+    position: absolute; font-family: var(--font-mono);
+    font-size: 0.6rem; color: rgba(0,212,255,0.6);
+    letter-spacing: 0.05em; pointer-events: none;
+  }
+  .hud-tl { top: 1rem; left: 1rem; }
+  .hud-tr { top: 1rem; right: 1rem; text-align: right; }
+  .hud-bl { bottom: 1rem; left: 1rem; }
+  .hud-br { bottom: 1rem; right: 1rem; text-align: right; }
+  .hud p { margin-bottom: 2px; }
+
+  /* LOADING */
+  .loading-overlay {
+    position: absolute; inset: 0;
+    background: rgba(8,12,16,0.85);
+    display: none; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 1rem; z-index: 10;
+  }
+  .loading-overlay.active { display: flex; }
+  .spinner {
+    width: 36px; height: 36px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text { font-family: var(--font-mono); font-size: 0.7rem; color: var(--accent); letter-spacing: 0.1em; }
+
+  /* ERROR */
+  .error-banner {
+    background: rgba(255,107,53,0.1); border: 1px solid var(--warn);
+    border-radius: 4px; padding: 0.75rem 1rem;
+    font-family: var(--font-mono); font-size: 0.7rem; color: var(--warn);
+    margin-bottom: 1rem; display: none;
+  }
+  .error-banner.active { display: block; }
+
+  /* FOOTER */
+  .footer {
+    border-top: 1px solid var(--border); padding: 0.6rem 2rem;
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--surface);
+  }
+  .footer-text { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted); letter-spacing: 0.08em; }
+  .footer-link { color: var(--accent); text-decoration: none; }
+  .footer-link:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="header">
+    <div class="logo">
+      <span class="logo-dot"></span>
+      DICOM·VIEWER
+    </div>
+    <span class="badge">CLIENT-SIDE · NO BACKEND</span>
+  </header>
+
+  <div class="workspace">
+
+    <aside class="sidebar">
+
+      <!-- Upload -->
+      <div class="sidebar-section">
+        <div class="sidebar-label">Load File</div>
+        <div id="error" class="error-banner"></div>
+        <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+          <span class="dropzone-icon">🩻</span>
+          <div class="dropzone-title" id="dropzone-title">Drop DICOM file here</div>
+          <div class="dropzone-sub" id="dropzone-sub">.dcm files only</div>
+        </div>
+        <input type="file" id="fileInput" accept=".dcm" style="display:none">
+      </div>
+
+      <!-- Windowing -->
+      <div class="sidebar-section">
+        <div class="sidebar-label">Windowing (W/L)</div>
+        <div class="control-row">
+          <div class="control-group">
+            <div class="control-label">
+              <span>Window Center</span>
+              <span class="control-value" id="wc-val">128</span>
+            </div>
+            <input type="range" class="slider" id="wc-slider" min="-1000" max="3000" value="128"
+              oninput="document.getElementById('wc-val').textContent = this.value">
+          </div>
+          <div class="control-group">
+            <div class="control-label">
+              <span>Window Width</span>
+              <span class="control-value" id="ww-val">256</span>
+            </div>
+            <input type="range" class="slider" id="ww-slider" min="1" max="4000" value="256"
+              oninput="document.getElementById('ww-val').textContent = this.value">
+          </div>
+          <button class="apply-btn" id="apply-btn" disabled onclick="applyWindow()">▶ APPLY WINDOW</button>
+        </div>
+      </div>
+
+      <!-- Metadata -->
+      <div class="sidebar-section" style="flex:1">
+        <div class="sidebar-label">DICOM Metadata</div>
+        <p class="meta-empty" id="meta-empty">No metadata</p>
+        <table class="meta-table" id="meta-table" style="display:none"></table>
+      </div>
+
+    </aside>
+
+    <!-- Viewer -->
+    <main class="viewer" id="viewer"
+      ondragover="event.preventDefault(); document.getElementById('dropzone').classList.add('drag-over')"
+      ondragleave="document.getElementById('dropzone').classList.remove('drag-over')"
+      ondrop="handleDrop(event)">
+
+      <div class="loading-overlay" id="loading">
+        <div class="spinner"></div>
+        <span class="loading-text">PROCESSING...</span>
+      </div>
+
+      <div class="viewer-empty" id="viewer-empty">
+        <span class="viewer-empty-icon">📡</span>
+        <div class="viewer-empty-text">AWAITING DICOM INPUT</div>
+      </div>
+
+      <canvas id="canvas" style="display:none"></canvas>
+
+      <div class="hud hud-tl" id="hud-tl" style="display:none">
+        <p id="hud-modality">—</p>
+        <p id="hud-date">—</p>
+      </div>
+      <div class="hud hud-tr" id="hud-tr" style="display:none">
+        <p id="hud-patient">ANONYMOUS</p>
+        <p id="hud-pid">—</p>
+      </div>
+      <div class="hud hud-bl" id="hud-bl" style="display:none">
+        <p id="hud-dims">—</p>
+      </div>
+      <div class="hud hud-br" id="hud-br" style="display:none">
+        <p id="hud-filename">—</p>
+      </div>
+    </main>
+
+  </div>
+
+  <footer class="footer">
+    <span class="footer-text">DICOM VIEWER · OPEN SOURCE · MIT LICENSE</span>
+    <span class="footer-text">BUILT WITH dicom-parser · RUNS ENTIRELY IN YOUR BROWSER</span>
+  </footer>
+
+</div>
+
+<script>
+  // ── State ──────────────────────────────────────────────────
+  let pixelData = null;   // Float64Array of HU/raw values
+  let rows = 0, cols = 0;
+
+  // ── Tag helpers ────────────────────────────────────────────
+  function tag(ds, t, fallback = '') {
+    try { return ds.string(t) || fallback; } catch { return fallback; }
+  }
+  function tagInt(ds, t, fallback = 0) {
+    try { return ds.intString(t) ?? ds.uint16(t) ?? fallback; } catch { return fallback; }
+  }
+  function tagFloat(ds, t, fallback = null) {
+    try { const v = ds.floatString(t); return v != null ? v : fallback; } catch { return fallback; }
+  }
+
+  // ── File input / drop ─────────────────────────────────────
+  document.getElementById('fileInput').addEventListener('change', e => {
+    if (e.target.files[0]) loadFile(e.target.files[0]);
+  });
+
+  function handleDrop(e) {
+    e.preventDefault();
+    document.getElementById('dropzone').classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) loadFile(file);
+  }
+
+  // ── Load & parse ──────────────────────────────────────────
+  function loadFile(file) {
+    setLoading(true);
+    setError('');
+
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const byteArray = new Uint8Array(e.target.result);
+        const ds = dicomParser.parseDicom(byteArray);
+        processDicom(ds, file.name);
+      } catch (err) {
+        setError('Failed to parse DICOM: ' + err.message);
+        setLoading(false);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function processDicom(ds, filename) {
+    // Dimensions
+    rows = tagInt(ds, 'x00280010');
+    cols = tagInt(ds, 'x00280011');
+
+    if (!rows || !cols) {
+      setError('No pixel data dimensions found in this file.');
+      setLoading(false);
+      return;
+    }
+
+    // Raw pixel array
+    const bitsAllocated = tagInt(ds, 'x00280100', 16);
+    const pixelRep      = tagInt(ds, 'x00280103', 0); // 0=unsigned, 1=signed
+    const pixelElement  = ds.elements['x7fe00010'];
+    if (!pixelElement) {
+      setError('No pixel data found in this file.');
+      setLoading(false);
+      return;
+    }
+
+    let raw;
+    if (bitsAllocated === 8) {
+      raw = new Uint8Array(ds.byteArray.buffer, pixelElement.dataOffset, pixelElement.length);
+    } else if (pixelRep === 1) {
+      raw = new Int16Array(ds.byteArray.buffer, pixelElement.dataOffset, pixelElement.length / 2);
+    } else {
+      raw = new Uint16Array(ds.byteArray.buffer, pixelElement.dataOffset, pixelElement.length / 2);
+    }
+
+    // Rescale slope/intercept (CT HU)
+    const slope     = tagFloat(ds, 'x00281053') ?? 1;
+    const intercept = tagFloat(ds, 'x00281052') ?? 0;
+
+    // Store as float array
+    pixelData = new Float64Array(rows * cols);
+    for (let i = 0; i < pixelData.length; i++) {
+      pixelData[i] = raw[i] * slope + intercept;
+    }
+
+    // Window defaults from DICOM tags, else auto
+    let wc, ww;
+    const wcTag = tagFloat(ds, 'x00281050');
+    const wwTag = tagFloat(ds, 'x00281051');
+    if (wcTag != null && wwTag != null) {
+      wc = wcTag; ww = wwTag;
+    } else {
+      // Auto window: 1st–99th percentile
+      const sorted = Float64Array.from(pixelData).sort();
+      const lo = sorted[Math.floor(sorted.length * 0.01)];
+      const hi = sorted[Math.floor(sorted.length * 0.99)];
+      wc = (lo + hi) / 2;
+      ww = hi - lo;
+    }
+
+    // Update sliders
+    document.getElementById('wc-slider').value = Math.round(wc);
+    document.getElementById('wc-val').textContent = Math.round(wc);
+    document.getElementById('ww-slider').value = Math.round(ww);
+    document.getElementById('ww-val').textContent = Math.round(ww);
+
+    // Render
+    renderPixels(wc, ww);
+
+    // Metadata
+    const meta = {
+      'Patient Name':    tag(ds, 'x00100010'),
+      'Patient ID':      tag(ds, 'x00100020'),
+      'Patient Age':     tag(ds, 'x00101010'),
+      'Patient Sex':     tag(ds, 'x00100040'),
+      'Study Date':      tag(ds, 'x00080020'),
+      'Modality':        tag(ds, 'x00080060'),
+      'Study Desc':      tag(ds, 'x00081030'),
+      'Series Desc':     tag(ds, 'x0008103e'),
+      'Institution':     tag(ds, 'x00080080'),
+      'Rows':            rows,
+      'Columns':         cols,
+      'Bits Allocated':  bitsAllocated,
+      'Slice Thickness': tagFloat(ds, 'x00500010') ?? tag(ds, 'x00500010'),
+      'Pixel Spacing':   tag(ds, 'x00280030'),
+    };
+
+    renderMeta(meta);
+
+    // HUD
+    document.getElementById('hud-modality').textContent = meta['Modality'] || '—';
+    document.getElementById('hud-date').textContent     = meta['Study Date'] || '—';
+    document.getElementById('hud-patient').textContent  = meta['Patient Name'] || 'ANONYMOUS';
+    document.getElementById('hud-pid').textContent      = meta['Patient ID'] || '—';
+    document.getElementById('hud-dims').textContent     = `${cols} × ${rows} px`;
+    document.getElementById('hud-filename').textContent = filename;
+
+    // Dropzone label
+    document.getElementById('dropzone-title').textContent = filename;
+    document.getElementById('dropzone-sub').textContent   = 'click to replace';
+
+    // Enable button, show HUD
+    document.getElementById('apply-btn').disabled = false;
+    ['hud-tl','hud-tr','hud-bl','hud-br'].forEach(id =>
+      document.getElementById(id).style.display = 'block'
+    );
+
+    setLoading(false);
+  }
+
+  // ── Render pixels to canvas ───────────────────────────────
+  function renderPixels(wc, ww) {
+    const canvas = document.getElementById('canvas');
+    canvas.width  = cols;
+    canvas.height = rows;
+
+    const ctx = canvas.getContext('2d');
+    const imageData = ctx.createImageData(cols, rows);
+    const data = imageData.data;
+
+    const low  = wc - ww / 2;
+    const high = wc + ww / 2;
+    const range = high - low;
+
+    for (let i = 0; i < pixelData.length; i++) {
+      const val = Math.max(0, Math.min(255, ((pixelData[i] - low) / range) * 255));
+      const idx = i * 4;
+      data[idx]     = val;
+      data[idx + 1] = val;
+      data[idx + 2] = val;
+      data[idx + 3] = 255;
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+
+    document.getElementById('viewer-empty').style.display = 'none';
+    canvas.style.display = 'block';
+  }
+
+  function applyWindow() {
+    if (!pixelData) return;
+    const wc = parseFloat(document.getElementById('wc-slider').value);
+    const ww = parseFloat(document.getElementById('ww-slider').value);
+    renderPixels(wc, ww);
+  }
+
+  // ── Metadata table ────────────────────────────────────────
+  function renderMeta(meta) {
+    const table = document.getElementById('meta-table');
+    table.innerHTML = '';
+    let hasAny = false;
+    for (const [k, v] of Object.entries(meta)) {
+      if (v == null || v === '' || v === 0) continue;
+      hasAny = true;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td class="meta-key">${k}</td><td class="meta-val">${v}</td>`;
+      table.appendChild(tr);
+    }
+    document.getElementById('meta-empty').style.display = hasAny ? 'none' : 'block';
+    table.style.display = hasAny ? 'table' : 'none';
+  }
+
+  // ── UI helpers ────────────────────────────────────────────
+  function setLoading(on) {
+    document.getElementById('loading').classList.toggle('active', on);
+  }
+  function setError(msg) {
+    const el = document.getElementById('error');
+    el.textContent = msg ? '⚠ ' + msg : '';
+    el.classList.toggle('active', !!msg);
+  }
+</script>
+</body>
+</html>
