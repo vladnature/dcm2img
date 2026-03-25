@@ -1,8 +1,8 @@
 const express = require('express');
 const multer = require('multer');
-const fetch = require('node-fetch');
 const path = require('path');
-const fs = require('fs');
+
+// Node 18+ has built-in fetch — no node-fetch needed
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -90,6 +90,7 @@ The heatmap values should highlight areas of significant intensity. Return ONLY 
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`dcm2img server running on port ${PORT}`);
+  console.log(`API key: ${ANTHROPIC_API_KEY ? 'SET' : 'NOT SET — add ANTHROPIC_API_KEY in Railway Variables'}`);
 });
