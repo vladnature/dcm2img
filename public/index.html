@@ -557,10 +557,7 @@ function initCornerstone() {
     if (typeof cornerstoneTools === 'undefined') throw new Error('cornerstoneTools not loaded');
 
     cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
-    // cornerstoneWADOImageLoader bundles dicomParser internally
-    if (typeof dicomParser !== 'undefined') {
-      cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
-    }
+    cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
     cornerstoneWADOImageLoader.configure({ useWebWorkers: false });
 
     cornerstone.enable(csEl);
