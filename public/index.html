@@ -591,16 +591,23 @@ dropzone.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.
 document.getElementById('fileInput').addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
 
 // Allow drop anywhere on the page
-document.body.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); });
-document.body.addEventListener('drop', e => {
+document.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); });
+document.addEventListener('drop', e => {
   e.preventDefault(); e.stopPropagation();
+  console.log('Drop event fired', e.dataTransfer.files);
   const file = e.dataTransfer.files[0];
-  if (file) handleFile(file);
+  if (file) {
+    console.log('Handling file:', file.name, file.size, file.type);
+    handleFile(file);
+  } else {
+    console.log('No file in drop event');
+  }
 });
 
 // ─── HANDLE FILE ─────────────────────────────────────────────────────────────
 async function handleFile(file) {
   const name = file.name.toLowerCase();
+  console.log('handleFile called:', name, file.size + ' bytes');
   setStatus('LOADING...', 'live');
   clearHeatmap();
   document.getElementById('emptyState').style.display = 'none';
@@ -613,14 +620,16 @@ async function handleFile(file) {
 
   try {
     if (name.endsWith('.nii') || name.endsWith('.nii.gz') || name.endsWith('.gz')) {
+      console.log('Loading as NIfTI');
       await loadNIfTI(file);
     } else {
-      // IM000000 style files have no extension — try DICOM first, then NIfTI
+      console.log('Trying as DICOM first');
       try {
         await loadDICOM(file);
       } catch(e1) {
+        console.log('DICOM failed:', e1.message, '— trying NIfTI');
         try { await loadNIfTI(file); }
-        catch(e2) { throw new Error('Not a recognised medical image format'); }
+        catch(e2) { throw new Error('Not a recognised medical image format: ' + e1.message); }
       }
     }
     S.imageLoaded = true;
