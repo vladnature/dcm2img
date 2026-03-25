@@ -645,39 +645,39 @@ async function loadDICOM(file) {
   document.getElementById('fileIcon').textContent = '🩻';
   document.getElementById('modBadge').textContent = 'DCM';
 
-  // Ensure the cornerstone element has explicit dimensions
-  const vp = document.getElementById('mainVp');
-  csEl.style.width = vp.clientWidth + 'px';
-  csEl.style.height = vp.clientHeight + 'px';
-
   const imageId = cornerstoneWADOImageLoader.wadouri.fileManager.add(file);
+  console.log('Loading imageId:', imageId);
   const image = await cornerstone.loadAndCacheImage(imageId);
+  console.log('Image loaded:', image.width, image.height, 'wc:', image.windowCenter, 'ww:', image.windowWidth);
 
-  // Force resize before display
-  cornerstone.resize(csEl, true);
-  cornerstone.displayImage(csEl, image);
-
-  // Auto window/level from image data if defaults are bad
+  // Compute pixel range for W/L
   const px = image.getPixelData();
   let mn = Infinity, mx = -Infinity;
   for (let i = 0; i < px.length; i++) {
     if (px[i] < mn) mn = px[i];
     if (px[i] > mx) mx = px[i];
   }
+  console.log('Pixel range:', mn, 'to', mx);
   S.pixelMin = mn; S.pixelMax = mx;
   S.pixelData = px;
-
-  // Use actual image window/level or compute from pixel range
-  S.wc = image.windowCenter || (mn + mx) / 2;
-  S.ww = image.windowWidth || (mx - mn);
   S.imageW = image.width;
   S.imageH = image.height;
 
-  // Apply computed W/L back to viewport
+  // Use image W/L or compute from range
+  S.wc = image.windowCenter || Math.round((mn + mx) / 2);
+  S.ww = image.windowWidth || Math.round(mx - mn) || 256;
+
+  // Display image first
+  cornerstone.displayImage(csEl, image);
+
+  // Then apply W/L
   const csVp = cornerstone.getViewport(csEl);
-  csVp.voi.windowCenter = S.wc;
-  csVp.voi.windowWidth = S.ww;
-  cornerstone.setViewport(csEl, csVp);
+  if (csVp) {
+    csVp.voi.windowCenter = S.wc;
+    csVp.voi.windowWidth = S.ww;
+    cornerstone.setViewport(csEl, csVp);
+  }
+  console.log('Display complete, W/L:', S.wc, S.ww);
 
   enableSliders();
   document.getElementById('wcSlider').min = mn;
