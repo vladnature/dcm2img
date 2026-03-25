@@ -581,9 +581,13 @@ const dropzone = document.getElementById('dropzone');
 dropzone.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
 document.getElementById('fileInput').addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
 
-// Allow drop on the whole viewer too
-document.getElementById('mainVp').addEventListener('dragover', e => e.preventDefault());
-document.getElementById('mainVp').addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+// Allow drop anywhere on the page
+document.body.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); });
+document.body.addEventListener('drop', e => {
+  e.preventDefault(); e.stopPropagation();
+  const file = e.dataTransfer.files[0];
+  if (file) handleFile(file);
+});
 
 // ─── HANDLE FILE ─────────────────────────────────────────────────────────────
 async function handleFile(file) {
@@ -626,29 +630,46 @@ async function loadDICOM(file) {
   document.getElementById('fileIcon').textContent = '🩻';
   document.getElementById('modBadge').textContent = 'DCM';
 
+  // Ensure the cornerstone element has explicit dimensions
+  const vp = document.getElementById('mainVp');
+  csEl.style.width = vp.clientWidth + 'px';
+  csEl.style.height = vp.clientHeight + 'px';
+
   const imageId = cornerstoneWADOImageLoader.wadouri.fileManager.add(file);
   const image = await cornerstone.loadAndCacheImage(imageId);
+
+  // Force resize before display
+  cornerstone.resize(csEl, true);
   cornerstone.displayImage(csEl, image);
 
-  S.wc = image.windowCenter || 40;
-  S.ww = image.windowWidth || 400;
-  S.imageW = image.width;
-  S.imageH = image.height;
-  S.pixelData = image.getPixelData();
-
-  // Find min/max
+  // Auto window/level from image data if defaults are bad
+  const px = image.getPixelData();
   let mn = Infinity, mx = -Infinity;
-  for (let i = 0; i < S.pixelData.length; i++) {
-    if (S.pixelData[i] < mn) mn = S.pixelData[i];
-    if (S.pixelData[i] > mx) mx = S.pixelData[i];
+  for (let i = 0; i < px.length; i++) {
+    if (px[i] < mn) mn = px[i];
+    if (px[i] > mx) mx = px[i];
   }
   S.pixelMin = mn; S.pixelMax = mx;
+  S.pixelData = px;
+
+  // Use actual image window/level or compute from pixel range
+  S.wc = image.windowCenter || (mn + mx) / 2;
+  S.ww = image.windowWidth || (mx - mn);
+  S.imageW = image.width;
+  S.imageH = image.height;
+
+  // Apply computed W/L back to viewport
+  const csVp = cornerstone.getViewport(csEl);
+  csVp.voi.windowCenter = S.wc;
+  csVp.voi.windowWidth = S.ww;
+  cornerstone.setViewport(csEl, csVp);
 
   enableSliders();
-  document.getElementById('wcSlider').min = S.wc - 2000;
-  document.getElementById('wcSlider').max = S.wc + 2000;
+  document.getElementById('wcSlider').min = mn;
+  document.getElementById('wcSlider').max = mx;
   document.getElementById('wcSlider').value = S.wc;
-  document.getElementById('wwSlider').max = 4000;
+  document.getElementById('wwSlider').min = 1;
+  document.getElementById('wwSlider').max = (mx - mn) || 4000;
   document.getElementById('wwSlider').value = S.ww;
   document.getElementById('wcVal').textContent = Math.round(S.wc);
   document.getElementById('wwVal').textContent = Math.round(S.ww);
