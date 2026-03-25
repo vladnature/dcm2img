@@ -8,7 +8,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cornerstone-core/2.6.1/cornerstone.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cornerstone-math/0.1.9/cornerstoneMath.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dicom-parser/1.8.21/dicomParser.min.js"></script>
+<script src="https://unpkg.com/dicom-parser@1.8.21/build/dicomParser.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/cornerstone-wado-image-loader@4.13.2/dist/cornerstoneWADOImageLoader.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/cornerstone-tools@6.0.10/dist/cornerstoneTools.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/nifti-reader-js@0.6.8/release/nifti-reader.js"></script>
@@ -546,12 +546,21 @@ let csReady = false;
 
 function initCornerstone() {
   try {
+    console.log('Init check:', {
+      cornerstone: typeof cornerstone,
+      cornerstoneWADOImageLoader: typeof cornerstoneWADOImageLoader,
+      dicomParser: typeof dicomParser,
+      cornerstoneTools: typeof cornerstoneTools,
+      nifti: typeof nifti
+    });
     if (typeof cornerstoneWADOImageLoader === 'undefined') throw new Error('cornerstoneWADOImageLoader not loaded');
-    if (typeof dicomParser === 'undefined') throw new Error('dicomParser not loaded');
     if (typeof cornerstoneTools === 'undefined') throw new Error('cornerstoneTools not loaded');
 
     cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
-    cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
+    // cornerstoneWADOImageLoader bundles dicomParser internally
+    if (typeof dicomParser !== 'undefined') {
+      cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
+    }
     cornerstoneWADOImageLoader.configure({ useWebWorkers: false });
 
     cornerstone.enable(csEl);
