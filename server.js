@@ -5,9 +5,25 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
-// Serve nifti-reader-js from node_modules
+// Serve nifti-reader.js — tries multiple paths for Railway compatibility
 app.get('/nifti-reader.js', (req, res) => {
-  res.sendFile(path.join(__dirname, 'node_modules/nifti-reader-js/release/current/nifti-reader.js'));
+  const path = require('path');
+  const fs = require('fs');
+  const candidates = [
+    path.join(__dirname, 'node_modules', 'nifti-reader-js', 'dist', 'nifti-reader.js'),
+    path.join(__dirname, 'node_modules', 'nifti-reader-js', 'src', 'nifti-reader.js'),
+    path.join(process.cwd(), 'node_modules', 'nifti-reader-js', 'dist', 'nifti-reader.js'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      console.log('Serving nifti-reader.js from:', p);
+      res.setHeader('Content-Type', 'application/javascript');
+      return res.sendFile(p);
+    }
+  }
+  // Last resort: serve a CDN redirect
+  console.error('nifti-reader.js not found in node_modules, falling back to CDN');
+  res.redirect('https://unpkg.com/nifti-reader-js@1.0.1/dist/nifti-reader.js');
 });
 
 // Serve static frontend
