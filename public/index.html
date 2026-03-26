@@ -244,7 +244,7 @@ async function handleFile(file){
   S.wc=40;S.ww=400;
   try{
     if(name.endsWith('.nii')||name.endsWith('.nii.gz')||name.endsWith('.gz')){await loadNII(file);}
-    else{try{await loadDCM(file);}catch(e1){try{await loadNII(file);}catch(e2){throw new Error('Cannot parse as DICOM or NIfTI');}}}
+    else{try{await loadDCM(file);}catch(e1){try{await loadNII(file);}catch(e2){/* try as DICOM */ isNifti = false;}}}
     S.loaded=true;
     document.getElementById('hBtn').disabled=false;
     setStatus('LOADED — '+file.name,'ok');
