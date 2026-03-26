@@ -248,7 +248,7 @@ async function handleFile(file){
   S.wc=40;S.ww=400;
   try{
     if(name.endsWith('.nii')||name.endsWith('.nii.gz')||name.endsWith('.gz')){await loadNII(file);}
-    else{try{await loadDCM(file);}catch(e1){try{await loadNII(file);}catch(e2){/* try as DICOM */ isNifti = false;}}}
+    else{try{await loadDCM(file);}catch(e1){try{await loadNII(file);}catch(e2){throw new Error('Cannot parse as DICOM or NIfTI: '+e1.message);}}}
     S.loaded=true;
     document.getElementById('hBtn').disabled=false;
     setStatus('LOADED — '+file.name,'ok');
@@ -266,10 +266,15 @@ async function loadDCM(file){
   const px=img.getPixelData();
   let mn=Infinity,mx=-Infinity;
   for(let i=0;i<px.length;i++){if(px[i]<mn)mn=px[i];if(px[i]>mx)mx=px[i];}
-  S.px=px;S.pMin=mn;S.pMax=mx;S.iW=img.width;S.iH=img.height;
+  S.px=px;S.pMin=mn;S.pMax=mx;
+  // Fallback for extensionless DICOMs where width/height may be 0
+  S.iW=img.width||img.columns||(img.rows?Math.round(px.length/img.rows):Math.round(Math.sqrt(px.length)));
+  S.iH=img.height||img.rows||(S.iW?Math.round(px.length/S.iW):S.iW);
   S.wc=img.windowCenter||Math.round((mn+mx)/2);
   S.ww=img.windowWidth||Math.round(mx-mn)||256;
   cornerstone.displayImage(csEl,img);
+  // If dimensions were 0, draw manually on canvas as fallback
+  if(S.iW>0&&S.iH>0){drawNII(px,S.iW,S.iH,S.wc,S.ww);}
   const vp=cornerstone.getViewport(csEl);
   if(vp){vp.voi.windowCenter=S.wc;vp.voi.windowWidth=S.ww;if(S.inv)vp.invert=true;cornerstone.setViewport(csEl,vp);}
   enSliders(mn,mx);
