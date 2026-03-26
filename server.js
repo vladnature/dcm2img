@@ -7,7 +7,7 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 // Serve nifti-reader-js from node_modules
 app.get('/nifti-reader.js', (req, res) => {
-  res.sendFile(path.join(__dirname, 'node_modules/nifti-reader-js/release/nifti-reader.js'));
+  res.sendFile(path.join(__dirname, 'node_modules/nifti-reader-js/release/current/nifti-reader.js'));
 });
 
 // Serve static frontend
