@@ -532,11 +532,7 @@ const S = {
   // Heatmap
   heatGenerated: false,
   // Zoom/pan state for canvas
-  zoom: 1, panX: 0, panY: 0,
-  isDragging: false, lastX: 0, lastY: 0,
-  // Measurement
-  measuring: null,
-  measurements: [],
+  zoom: 1,
   inverted: false,
 };
 
@@ -545,17 +541,18 @@ const csEl = document.getElementById('mainVp');
 let csReady = false;
 
 function initCornerstone() {
-  try {
-    console.log('Init check:', {
-      cornerstone: typeof cornerstone,
-      cornerstoneWADOImageLoader: typeof cornerstoneWADOImageLoader,
-      dicomParser: typeof dicomParser,
-      cornerstoneTools: typeof cornerstoneTools,
-      nifti: typeof nifti
-    });
-    if (typeof cornerstoneWADOImageLoader === 'undefined') throw new Error('cornerstoneWADOImageLoader not loaded');
-    if (typeof cornerstoneTools === 'undefined') throw new Error('cornerstoneTools not loaded');
+  const allLoaded =
+    typeof cornerstone !== 'undefined' &&
+    typeof cornerstoneWADOImageLoader !== 'undefined' &&
+    typeof dicomParser !== 'undefined' &&
+    typeof cornerstoneTools !== 'undefined';
 
+  if (!allLoaded) {
+    setTimeout(initCornerstone, 300);
+    return;
+  }
+
+  try {
     cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
     cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
     cornerstoneWADOImageLoader.configure({ useWebWorkers: false });
@@ -584,27 +581,19 @@ const dropzone = document.getElementById('dropzone');
 
 ['dragenter','dragover'].forEach(e => dropzone.addEventListener(e, ev => { ev.preventDefault(); dropzone.classList.add('over'); }));
 ['dragleave','drop'].forEach(e => dropzone.addEventListener(e, () => dropzone.classList.remove('over')));
-dropzone.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
 document.getElementById('fileInput').addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
 
 // Allow drop anywhere on the page
-document.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); });
+document.addEventListener('dragover', e => { e.preventDefault(); });
 document.addEventListener('drop', e => {
-  e.preventDefault(); e.stopPropagation();
-  console.log('Drop event fired', e.dataTransfer.files);
+  e.preventDefault();
   const file = e.dataTransfer.files[0];
-  if (file) {
-    console.log('Handling file:', file.name, file.size, file.type);
-    handleFile(file);
-  } else {
-    console.log('No file in drop event');
-  }
+  if (file) handleFile(file);
 });
 
 // ─── HANDLE FILE ─────────────────────────────────────────────────────────────
 async function handleFile(file) {
   const name = file.name.toLowerCase();
-  console.log('handleFile called:', name, file.size + ' bytes');
   setStatus('LOADING...', 'live');
   clearHeatmap();
   document.getElementById('emptyState').style.display = 'none';
@@ -617,14 +606,11 @@ async function handleFile(file) {
 
   try {
     if (name.endsWith('.nii') || name.endsWith('.nii.gz') || name.endsWith('.gz')) {
-      console.log('Loading as NIfTI');
       await loadNIfTI(file);
     } else {
-      console.log('Trying as DICOM first');
       try {
         await loadDICOM(file);
       } catch(e1) {
-        console.log('DICOM failed:', e1.message, '— trying NIfTI');
         try { await loadNIfTI(file); }
         catch(e2) { throw new Error('Not a recognised medical image format: ' + e1.message); }
       }
@@ -646,9 +632,7 @@ async function loadDICOM(file) {
   document.getElementById('modBadge').textContent = 'DCM';
 
   const imageId = cornerstoneWADOImageLoader.wadouri.fileManager.add(file);
-  console.log('Loading imageId:', imageId);
   const image = await cornerstone.loadAndCacheImage(imageId);
-  console.log('Image loaded:', image.width, image.height, 'wc:', image.windowCenter, 'ww:', image.windowWidth);
 
   // Compute pixel range for W/L
   const px = image.getPixelData();
@@ -657,7 +641,6 @@ async function loadDICOM(file) {
     if (px[i] < mn) mn = px[i];
     if (px[i] > mx) mx = px[i];
   }
-  console.log('Pixel range:', mn, 'to', mx);
   S.pixelMin = mn; S.pixelMax = mx;
   S.pixelData = px;
   S.imageW = image.width;
@@ -677,7 +660,6 @@ async function loadDICOM(file) {
     csVp.voi.windowWidth = S.ww;
     cornerstone.setViewport(csEl, csVp);
   }
-  console.log('Display complete, W/L:', S.wc, S.ww);
 
   enableSliders();
   document.getElementById('wcSlider').min = mn;
@@ -1016,7 +998,7 @@ async function generateHeatmap() {
   showProgress(10);
 
   try {
-    const { nx, ny } = { nx: S.imageW, ny: S.imageH };
+    const nx = S.imageW, ny = S.imageH;
     const data = S.pixelData;
     const gridSize = 16;
     const stepX = Math.max(1, Math.floor(nx / gridSize));
