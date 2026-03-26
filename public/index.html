@@ -255,38 +255,92 @@ async function handleFile(file){
   }catch(err){setStatus('ERROR: '+err.message,'err');console.error(err);}
 }
 
+
 // ── DICOM ─────────────────────────────────────────────────────────────────────
 async function loadDCM(file){
-  if(!csReady)throw new Error('Libraries still loading, try again');
   S.fileType='dicom';
   document.getElementById('cIcon').textContent='🩻';
   document.getElementById('vl').textContent='AXIAL';
-  const id=cornerstoneWADOImageLoader.wadouri.fileManager.add(file);
-  const img=await cornerstone.loadAndCacheImage(id);
-  const px=img.getPixelData();
-  let mn=Infinity,mx=-Infinity;
-  for(let i=0;i<px.length;i++){if(px[i]<mn)mn=px[i];if(px[i]>mx)mx=px[i];}
-  S.px=px;S.pMin=mn;S.pMax=mx;
-  // Fallback for extensionless DICOMs where width/height may be 0
-  S.iW=img.width||img.columns||(img.rows?Math.round(px.length/img.rows):Math.round(Math.sqrt(px.length)));
-  S.iH=img.height||img.rows||(S.iW?Math.round(px.length/S.iW):S.iW);
-  S.wc=img.windowCenter||Math.round((mn+mx)/2);
-  S.ww=img.windowWidth||Math.round(mx-mn)||256;
-  cornerstone.displayImage(csEl,img);
-  // If dimensions were 0, draw manually on canvas as fallback
-  if(S.iW>0&&S.iH>0){drawNII(px,S.iW,S.iH,S.wc,S.ww);}
-  const vp=cornerstone.getViewport(csEl);
-  if(vp){vp.voi.windowCenter=S.wc;vp.voi.windowWidth=S.ww;if(S.inv)vp.invert=true;cornerstone.setViewport(csEl,vp);}
-  enSliders(mn,mx);
-  document.getElementById('slS').disabled=true;
-  document.getElementById('slV').textContent='1/1';
-  document.getElementById('dimD').textContent=img.width+'×'+img.height;
-  ['mA','mC','mS'].forEach(x=>document.getElementById(x).disabled=true);
-  const d=img.data;
-  const mod=d?.string('x00080060')||'';
-  document.getElementById('modB').textContent=mod||'DCM';
-  renderMeta({'Modality':mod||'—','Patient':d?.string('x00100010')||'—','Study Date':d?.string('x00080020')||'—','Study Desc':d?.string('x00081030')||'—','Rows':img.rows||'—','Columns':img.columns||'—','Px Spacing':d?.string('x00280030')||'—','Bits':d?.uint16('x00280100')||'—','Slope':img.slope??1,'Intercept':img.intercept??0});
-  S.rOx=0;S.rOy=0;S.rW=csEl.clientWidth;S.rH=csEl.clientHeight;
+
+  // Parse directly with dicomParser — works for all DICOM including extensionless
+  const buf = await readAB(file);
+  const ba = new Uint8Array(buf);
+  let ds;
+  try { ds = dicomParser.parseDicom(ba); } catch(e) { throw new Error('Not a valid DICOM file: '+e.message); }
+
+  const rows    = ds.uint16('x00280010') || 0;
+  const cols    = ds.uint16('x00280011') || 0;
+  const bitsAlloc = ds.uint16('x00280100') || 16;
+  const pixRep  = ds.uint16('x00280103') || 0; // 0=unsigned, 1=signed
+  const slope   = parseFloat(ds.string('x00281053') || '1') || 1;
+  const intercept = parseFloat(ds.string('x00281052') || '0') || 0;
+  const wc      = parseFloat(ds.string('x00281050') || '0') || null;
+  const ww      = parseFloat(ds.string('x00281051') || '0') || null;
+
+  if (!rows || !cols) throw new Error('DICOM missing rows/columns tags');
+
+  // Extract pixel data
+  const pixEl = ds.elements['x7fe00010'];
+  if (!pixEl) throw new Error('DICOM has no pixel data element');
+  const pixOffset = pixEl.dataOffset;
+  const pixLength = pixEl.length;
+  const pixBuf = buf.slice(pixOffset, pixOffset + pixLength);
+
+  let px;
+  if (bitsAlloc === 16) {
+    px = pixRep === 1 ? new Int16Array(pixBuf) : new Uint16Array(pixBuf);
+  } else if (bitsAlloc === 32) {
+    px = new Int32Array(pixBuf);
+  } else {
+    px = new Uint8Array(pixBuf);
+  }
+
+  // Apply rescale
+  let mn = Infinity, mx = -Infinity;
+  const pxF = new Float32Array(px.length);
+  for (let i = 0; i < px.length; i++) {
+    pxF[i] = px[i] * slope + intercept;
+    if (pxF[i] < mn) mn = pxF[i];
+    if (pxF[i] > mx) mx = pxF[i];
+  }
+
+  S.px = pxF; S.pMin = mn; S.pMax = mx; S.iW = cols; S.iH = rows;
+  S.wc = wc || Math.round((mn + mx) / 2);
+  S.ww = ww || Math.round(mx - mn) || 256;
+
+  // Render on canvas directly (same pipeline as NIfTI)
+  drawNII(pxF, cols, rows, S.wc, S.ww);
+
+  // Also try cornerstone for tools support (non-blocking)
+  if (csReady) {
+    try {
+      const id = cornerstoneWADOImageLoader.wadouri.fileManager.add(file);
+      const img = await cornerstone.loadAndCacheImage(id);
+      cornerstone.displayImage(csEl, img);
+      const vp = cornerstone.getViewport(csEl);
+      if (vp) { vp.voi.windowCenter = S.wc; vp.voi.windowWidth = S.ww; if (S.inv) vp.invert = true; cornerstone.setViewport(csEl, vp); }
+    } catch(e) { /* canvas render already done above, tools won't work but image shows */ }
+  }
+
+  enSliders(mn, mx);
+  document.getElementById('slS').disabled = true;
+  document.getElementById('slV').textContent = '1/1';
+  document.getElementById('dimD').textContent = cols + '×' + rows;
+  ['mA','mC','mS'].forEach(x => document.getElementById(x).disabled = true);
+
+  const mod = ds.string('x00080060') || '';
+  document.getElementById('modB').textContent = mod || 'DCM';
+  renderMeta({
+    'Modality': mod || '—',
+    'Patient': ds.string('x00100010') || '—',
+    'Study Date': ds.string('x00080020') || '—',
+    'Study Desc': ds.string('x00081030') || '—',
+    'Rows': rows, 'Columns': cols,
+    'Px Spacing': ds.string('x00280030') || '—',
+    'Bits': bitsAlloc,
+    'Slope': slope, 'Intercept': intercept
+  });
+  S.rOx = 0; S.rOy = 0; S.rW = csEl.clientWidth; S.rH = csEl.clientHeight;
 }
 
 // ── NIFTI ─────────────────────────────────────────────────────────────────────
