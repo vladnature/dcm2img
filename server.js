@@ -1,63 +1,44 @@
 const express = require('express');
-const multer = require('multer');
 const path = require('path');
-
-// Node 18+ has built-in fetch — no node-fetch needed
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
-// Serve static files (the frontend HTML)
+// Serve nifti-reader-js from node_modules
+app.get('/nifti-reader.js', (req, res) => {
+  res.sendFile(path.join(__dirname, 'node_modules/nifti-reader-js/release/nifti-reader.js'));
+});
+
+// Serve static frontend
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json({ limit: '50mb' }));
 
-// Multer: store uploads in memory, max 100MB
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 100 * 1024 * 1024 },
-});
-
 // Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', version: '2.0' });
-});
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-// Heatmap analysis endpoint
-// Receives a downsampled intensity grid from the frontend
-// Calls Claude API, returns analysis JSON
-// No file is stored on disk
+// Heatmap analysis
 app.post('/api/analyze', async (req, res) => {
   try {
     const { grid, fileType, windowCenter, windowWidth, pixelMin, pixelMax, width, height } = req.body;
-
-    if (!grid || !Array.isArray(grid)) {
-      return res.status(400).json({ error: 'Invalid grid data' });
-    }
-
-    if (!ANTHROPIC_API_KEY) {
-      return res.status(500).json({ error: 'Server not configured with API key' });
-    }
+    if (!grid || !Array.isArray(grid)) return res.status(400).json({ error: 'Invalid grid data' });
+    if (!ANTHROPIC_API_KEY) return res.status(500).json({ error: 'API key not configured' });
 
     const prompt = `You are analyzing a medical image (${fileType?.toUpperCase()}, ${width}x${height} pixels).
 
-Here is a 16x16 grid of normalized intensity values (0=dark/low signal, 100=bright/high signal) sampled across the image:
+Here is a 16x16 grid of normalized intensity values (0=dark, 100=bright):
 
 ${grid.map(row => row.join(' ')).join('\n')}
 
 Window Centre: ${Math.round(windowCenter)}, Window Width: ${Math.round(windowWidth)}
 Min pixel: ${Math.round(pixelMin)}, Max pixel: ${Math.round(pixelMax)}
 
-Analyze this intensity grid and return a JSON object with this exact structure:
+Return ONLY valid JSON with this structure:
 {
-  "heatmap": [[...16 rows of 16 values, each 0.0 to 1.0...]],
-  "regions": [
-    {"label": "region name", "gx": 0-15, "gy": 0-15, "intensity": "low|medium|high"}
-  ],
-  "summary": "one sentence description of the intensity pattern"
-}
-
-The heatmap values should highlight areas of significant intensity. Return ONLY valid JSON, no other text.`;
+  "heatmap": [[...16 rows of 16 values, each 0.0-1.0...]],
+  "regions": [{"label": "region", "gx": 0-15, "gy": 0-15, "intensity": "low|medium|high"}],
+  "summary": "one sentence description"
+}`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -74,15 +55,10 @@ The heatmap values should highlight areas of significant intensity. Return ONLY 
     });
 
     const result = await response.json();
-
-    if (result.error) {
-      return res.status(500).json({ error: result.error.message });
-    }
+    if (result.error) return res.status(500).json({ error: result.error.message });
 
     const text = result.content[0].text.trim();
-    const jsonStr = text.replace(/```json|```/g, '').trim();
-    const analysis = JSON.parse(jsonStr);
-
+    const analysis = JSON.parse(text.replace(/```json|```/g, '').trim());
     res.json(analysis);
   } catch (err) {
     console.error('Analyze error:', err);
@@ -91,6 +67,6 @@ The heatmap values should highlight areas of significant intensity. Return ONLY 
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`dcm2img server running on port ${PORT}`);
-  console.log(`API key: ${ANTHROPIC_API_KEY ? 'SET' : 'NOT SET — add ANTHROPIC_API_KEY in Railway Variables'}`);
+  console.log(`dcm2img running on port ${PORT}`);
+  console.log(`API key: ${ANTHROPIC_API_KEY ? 'SET' : 'NOT SET'}`);
 });
